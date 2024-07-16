@@ -1,0 +1,108 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: reaper
+spec:
+  entrypoint: security-scan
+  templates:
+  - name: security-scan
+    steps:
+    - - name: scan-trivy-before-clone
+        template: scan-trivy-before-clone
+    - - name: clone-repo
+        template: clone-repo
+    - - name: scan-trivy-after-clone
+        template: scan-trivy-after-clone
+    - - name: scan-clamav
+        template: scan-clamav
+    - - name: kubescape-scan
+        template: kubescape
+    - - name: pretty-print-kubescape-results
+        template: pretty-print-kubescape-results
+    - - name: object-store-scan
+        template: object-store
+    - - name: sign-images
+        template: sign-images
+
+  - name: scan-trivy-before-clone
+    container:
+      image: aquasec/trivy
+      command: ["sh", "-c"]
+      args: ["trivy repo https://github.com/JUMP1ST/Input.git"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+
+  - name: clone-repo
+    container:
+      image: alpine/git
+      command: ["sh", "-c"]
+      args: ["git clone https://github.com/JUMP1ST/reaper.git /workspace/reaper"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+
+  - name: scan-trivy-after-clone
+    container:
+      image: aquasec/trivy
+      command: ["sh", "-c"]
+      args: ["trivy fs /workspace/reaper || { echo 'Trivy scan failed'; exit 1; }"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+
+  - name: scan-clamav
+    container:
+      image: clamav/clamav
+      command: ["sh", "-c"]
+      args: ["clamscan -r /workspace/reaper || { echo 'ClamAV scan failed'; exit 1; }"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+
+  - name: kubescape
+    container:
+      image: kubescape/kubescape:v1.0.178
+      command: ["sh", "-c"]
+      args: ["kubescape scan --format json --output /workspace/kubescape-results.json --submit=true && kubescape scan framework nsa --format json --output /workspace/kubescape-nsa-results.json"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+
+  - name: pretty-print-kubescape-results
+    container:
+      image: stedolan/jq
+      command: ["sh", "-c"]
+      args: ["jq . /workspace/kubescape-results.json && jq . /workspace/kubescape-nsa-results.json"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+
+  - name: object-store
+    container:
+      image: busybox
+      command: ["sh", "-c"]
+      args: ["echo 'Logic for scanning files in the object store will go here'"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+
+  - name: sign-images
+    container:
+      image: gcr.io/projectsigstore/cosign:v1.3.1
+      command: ["sh", "-c"]
+      args: ["cosign sign --key /workspace/cosign.key <image-name>"]
+    volumeMounts:
+    - name: reaper-pv
+      mountPath: /workspace
+    env:
+    - name: COSIGN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: cosign-secret
+          key: cosign.password
+
+volumes:
+  - name: reaper-pv
+    persistentVolumeClaim:
+      claimName: argo-pvc
