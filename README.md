@@ -7,3 +7,6 @@ This document provides an overview and detailed explanation of the Helm Package 
 * **Trivy Scanning**: Pre- and post-clone scanning for vulnerabilities.
 * **ClamAV Scanning**: Scanning for viruses.
 * **Git Operations**: Cloning repositories and pushing results.
+
+
+Will update later with other various integrations
